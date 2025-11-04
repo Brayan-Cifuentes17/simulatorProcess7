@@ -13,7 +13,7 @@ public class Process {
     private ArrayList<Partition> blockedPartitions;
     private int lastPartitionIndex;
     private ArrayList<Partition> partitionHistory;  // ← NUEVO: Historial de particiones asignadas
-
+    private ArrayList<Partition> partitionsByRound = new ArrayList<>();
     // Constructor principal
     public Process(String name, long time, Status status, long size, Partition partition) {
         this.name = name;
@@ -199,6 +199,14 @@ public class Process {
         cloned.lastPartitionIndex = this.lastPartitionIndex;
         cloned.partitionHistory = new ArrayList<>(this.partitionHistory);  // ← Clonar historial
         return cloned;
+    }
+
+    public void addPartitionByRound(Partition partition) {
+        partitionsByRound.add(partition);
+    }
+
+    public ArrayList<Partition> getPartitionsByRound() {
+        return partitionsByRound;
     }
 
     @Override

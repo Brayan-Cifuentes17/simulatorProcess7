@@ -130,64 +130,67 @@ public class ProcessManager {
         condensations.clear();
         compactations.clear();
         isFirstCondensation = true;
-        
+
         // Limpiar particiones
         for (Partition p : partitions) {
             p.clearExecutionData();
             p.setAvailable(false);
         }
-        
-        
+
         assignInitialPartitions();
-        
-        
         internalPartitions = new ArrayList<>(partitions);
-        
-        
         initialValues();
-        
+
         // Registrar particiones iniciales
         for (Partition part : partitions) {
             Process dummyProcess = new Process("", 0, Status.NO_BLOQUEADO, part.getSize());
             dummyProcess.setPartition(part);
             addLog(dummyProcess, Filter.PARTICIONES);
         }
-        
-        // Clonar y ordenar procesos por tiempo
+
+        // Clonar procesos manteniendo el orden de entrada
         ArrayList<Process> processQueue = new ArrayList<>();
         for (Process p : initialProcesses) {
             processQueue.add(p.clone());
         }
-        processQueue.sort((p1, p2) -> Long.compare(p1.getOriginalTime(), p2.getOriginalTime()));
-        
-        // Ejecutar ciclo de simulación
+        //processQueue.sort((p1, p2) -> Long.compare(p1.getOriginalTime(), p2.getOriginalTime()));
+
+        // Primera fase: simulación lógica
         while (!processQueue.isEmpty()) {
             Process currentProcess = processQueue.remove(0);
             startCycle(currentProcess, processQueue);
         }
-        
+
         // Resetear tiempos para segunda fase
         resetTimes();
-        
-        // Segunda fase: registrar logs reales
+
+        // Segunda fase: registrar logs reales con control de rondas
         processQueue = new ArrayList<>();
         for (Process p : initialProcesses) {
-            processQueue.add(p.clone());
+            Process clonedProcess = p.clone();
+            clonedProcess.setCycleCount(0); // reiniciar contador interno
+            processQueue.add(clonedProcess);
         }
-        processQueue.sort((p1, p2) -> Long.compare(p1.getOriginalTime(), p2.getOriginalTime()));
-        
-        int index = 0;
+        //processQueue.sort((p1, p2) -> Long.compare(p1.getOriginalTime(), p2.getOriginalTime()));
+
+        int index = 0; // contador global de rondas
+        int processCount=0;
+        int totalProcesses= initialProcesses.size();
+
         while (!processQueue.isEmpty()) {
             Process currentProcess = processQueue.remove(0);
             startRealCycle(currentProcess, processQueue, index);
-            
-            if (currentProcess.getName().equalsIgnoreCase(initialProcesses.get(initialProcesses.size() - 1).getName())) {
+            processCount++;
+
+            if(processCount==totalProcesses){
                 index++;
+                processCount=0;
             }
         }
-        
+
         resetTimes();
     }
+
 
     // ← Asignar particiones iniciales con límites
     public void assignInitialPartitions() {
@@ -212,8 +215,10 @@ public class ProcessManager {
         }
     }
 
-    // ← Ciclo de simulación (primera fase)
+    // ← CORREGIDO: Ciclo de simulación (primera fase)
     private void startCycle(Process currentProcess, ArrayList<Process> remainingProcesses) {
+
+        currentProcess.addPartitionByRound(currentProcess.getPartition());
         // Registrar en estado listo
         ready(currentProcess);
         
@@ -231,19 +236,20 @@ public class ProcessManager {
         currentProcess.incrementCycle();
         
         // ¿Terminó?
-        if (currentProcess.getRemainingTime() > 0) {
-            if (!currentProcess.isBlocked()) {
-                // No terminó, volver a la cola
-                remainingProcesses.add(currentProcess);
-            } else {
-                // Proceso bloqueado
-                remainingProcesses.add(currentProcess);
-            }
-        } else {
+        if (currentProcess.isFinished() || currentProcess.getRemainingTime() <= 0) {
             // Proceso terminado - liberar partición y condensar
             exitStage(currentProcess);
             substractTimeToOthers(remainingProcesses, currentProcess);
             reviewForCondensations(remainingProcesses, currentProcess, false);
+        } else {
+            // No terminó, volver a la cola
+            if (!currentProcess.isBlocked()) {
+                // No bloqueado, volver al final de la cola
+                remainingProcesses.add(currentProcess);
+            } else {
+                // Proceso bloqueado, volver a la cola
+                remainingProcesses.add(currentProcess);
+            }
         }
     }
 
@@ -338,6 +344,11 @@ public class ProcessManager {
                     }
                     
                     partitions.add(finalPartition);
+                    
+                    // ← NUEVO: Registrar la partición fusionada en los logs
+                    Process dummyProcess = new Process("", 0, Status.NO_BLOQUEADO, finalPartition.getSize());
+                    dummyProcess.setPartition(finalPartition);
+                    addLog(dummyProcess, Filter.PARTICIONES);
                 }
             } else {
                 // No es la última: mover la partición
@@ -369,6 +380,11 @@ public class ProcessManager {
                 isForExpired
             );
             compactations.add(compactation);
+            
+            // ← NUEVO: Registrar la partición libre creada en los logs
+            Process dummyProcess = new Process("", 0, Status.NO_BLOQUEADO, finalPartition.getSize());
+            dummyProcess.setPartition(finalPartition);
+            addLog(dummyProcess, Filter.PARTICIONES);
         }
         
         if (condensation != null) {
@@ -405,6 +421,11 @@ public class ProcessManager {
         
         partitions.add(partitionCreated);
         internalPartitions.set(i, partitionCreated);
+        
+        // ← NUEVO: Registrar la partición movida en los logs
+        Process dummyProcess = new Process("", 0, Status.NO_BLOQUEADO, partitionCreated.getSize());
+        dummyProcess.setPartition(partitionCreated);
+        addLog(dummyProcess, Filter.PARTICIONES);
     }
 
     public Process searchProcess(ArrayList<Process> processesForSearch, String name) {
@@ -429,18 +450,29 @@ public class ProcessManager {
         return "Part" + (partitions.size() + 1);
     }
 
-    // ← Segunda fase: registrar logs reales
+    // ← Segunda fase: registrar logs reales (con múltiples ciclos)
     private void startRealCycle(Process currentProcess, ArrayList<Process> remainingProcesses, int index) {
         try {
-            currentProcess.setPartition(currentProcess.getPartitionHistory().get(index));
+            // 🔹 Usamos el índice global (index) para determinar la ronda del proceso
+            if (index < currentProcess.getPartitionHistory().size()) {
+                Partition partitionToUse = currentProcess.getPartitionHistory().get(index);
+                currentProcess.setPartition(partitionToUse);
+
+                // 🔹 Registrar en el log la partición que se está usando en esta ronda
+                Process dummyProcess = new Process("", 0, Status.NO_BLOQUEADO, partitionToUse.getSize());
+                dummyProcess.setPartition(partitionToUse);
+                addLog(dummyProcess, Filter.PARTICIONES);
+            }
         } catch (Exception e) {
-            System.out.println(currentProcess.getName());
+            System.out.println("Error al obtener partición de la ronda " + index + " para " + currentProcess.getName());
         }
-        
+
+        // 🔹 Ejecuta el ciclo normal del proceso
         readyLog(currentProcess);
         dispatch(currentProcess);
-        inExecution(currentProcess);
-        
+        inExecution(currentProcess); // aquí normalmente incrementas su cycleCount
+
+        // 🔹 Verificar si el proceso aún no termina
         if (currentProcess.getRemainingTime() > 0) {
             if (!currentProcess.isBlocked()) {
                 expirationTime(currentProcess);
@@ -465,6 +497,7 @@ public class ProcessManager {
     public void inExecution(Process process) {
         addLog(process, Filter.EN_EJECUCION);
         process.subtractTime(Constants.QUANTUM_TIME);
+        process.incrementCycle();  // ← NUEVO: Incrementar contador de ciclos
     }
 
     public void expirationTime(Process process) {
