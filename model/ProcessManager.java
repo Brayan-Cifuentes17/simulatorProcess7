@@ -15,6 +15,7 @@ public class ProcessManager {
 
     public ProcessManager() {
         initialProcesses = new ArrayList<>();
+     //   loadProcesses();
         partitions = new ArrayList<>();
         executionLogs = new ArrayList<>();
         internalPartitions = new ArrayList<>();
@@ -23,13 +24,21 @@ public class ProcessManager {
         isFirstCondensation = true;
     }
 
-    // ========== GESTIÓN DE PARTICIONES ==========
-    
+    public void loadProcesses() {
+        addProcess("p15", 3, Status.NO_BLOQUEADO, 15);
+        addProcess("p13", 5, Status.NO_BLOQUEADO, 13);
+        addProcess("p4", 2, Status.NO_BLOQUEADO, 4);
+        addProcess("p12", 4, Status.NO_BLOQUEADO, 12);
+        addProcess("p18", 6, Status.NO_BLOQUEADO, 18);
+        addProcess("p5", 7, Status.NO_BLOQUEADO, 5);
+        addProcess("p8", 3, Status.NO_BLOQUEADO, 8);
+    }
+
     public void addPartition(String name, long size) {
         Partition partition = new Partition(name, size);
         partitions.add(partition);
     }
-    
+
     public void addPartition(Partition partition) {
         partitions.add(partition);
     }
@@ -56,7 +65,7 @@ public class ProcessManager {
                 .findFirst()
                 .orElse(null);
     }
-    
+
     public Partition searchPartition(String name) {
         for (int i = 0; i < partitions.size(); i++) {
             if (partitions.get(i).getName().equalsIgnoreCase(name)) {
@@ -68,18 +77,16 @@ public class ProcessManager {
 
     public boolean hasPartitionAssignedProcesses(String partitionName) {
         return initialProcesses.stream()
-                .anyMatch(p -> p.getPartition() != null && 
-                         p.getPartition().getName().equalsIgnoreCase(partitionName));
+                .anyMatch(p -> p.getPartition() != null &&
+                        p.getPartition().getName().equalsIgnoreCase(partitionName));
     }
 
     public ArrayList<Partition> getPartitions() {
         return new ArrayList<>(partitions);
     }
 
-    // ========== GESTIÓN DE PROCESOS ==========
-    
     public void addProcess(String name, long time, Status status, long size) {
-        Process process = new Process(name, time, status, size);  
+        Process process = new Process(name, time, status, size);
         initialProcesses.add(process);
     }
 
@@ -96,8 +103,8 @@ public class ProcessManager {
         initialProcesses.removeIf(p -> p.getName().equalsIgnoreCase(name.trim()));
     }
 
-    public void editProcess(int position, String processName, long newTime, 
-                        Status newStatus, long newSize) {
+    public void editProcess(int position, String processName, long newTime,
+            Status newStatus, long newSize) {
         if (position >= 0 && position < initialProcesses.size()) {
             Process existingProcess = initialProcesses.get(position);
             if (existingProcess.getName().equalsIgnoreCase(processName)) {
@@ -124,7 +131,7 @@ public class ProcessManager {
     }
 
     // ========== SIMULACIÓN CON CONDENSACIÓN Y COMPACTACIÓN ==========
-    
+
     public void runSimulation() {
         executionLogs.clear();
         condensations.clear();
@@ -153,10 +160,17 @@ public class ProcessManager {
         for (Process p : initialProcesses) {
             processQueue.add(p.clone());
         }
-        //processQueue.sort((p1, p2) -> Long.compare(p1.getOriginalTime(), p2.getOriginalTime()));
+        processQueue.sort((p1, p2) -> Long.compare(p1.getOriginalTime(), p2.getOriginalTime()));
 
+        Process actualProcess = null;
+        int round = 1;
         // Primera fase: simulación lógica
         while (!processQueue.isEmpty()) {
+            actualProcess = processQueue.get(0);
+            if (actualProcess.getRound() > round) {
+                round++;
+                addNewPartitions(processQueue);
+            }
             Process currentProcess = processQueue.remove(0);
             startCycle(currentProcess, processQueue);
         }
@@ -171,37 +185,71 @@ public class ProcessManager {
             clonedProcess.setCycleCount(0); // reiniciar contador interno
             processQueue.add(clonedProcess);
         }
-        //processQueue.sort((p1, p2) -> Long.compare(p1.getOriginalTime(), p2.getOriginalTime()));
+        // processQueue.sort((p1, p2) -> Long.compare(p1.getOriginalTime(),
+        //p2.getOriginalTime()));
 
         int index = 0; // contador global de rondas
-        int processCount=0;
-        int totalProcesses= initialProcesses.size();
+        int processCount = 0;
+        int totalProcesses = initialProcesses.size();
 
         while (!processQueue.isEmpty()) {
             Process currentProcess = processQueue.remove(0);
             startRealCycle(currentProcess, processQueue, index);
             processCount++;
 
-            if(processCount==totalProcesses){
+            if (processCount == totalProcesses) {
                 index++;
-                processCount=0;
+                processCount = 0;
             }
         }
 
         resetTimes();
     }
 
+    public void addNewPartitions(ArrayList<Process> processesToUpdate) {
+        ArrayList<Partition> partitionsCreated = new ArrayList<>();
+        long sizeNewPartitions = 0;
+        for (Process process : processesToUpdate) {
+            Partition partition = assignPartition(process);
+            partitionsCreated.add(partition);
+            internalPartitions.add(internalPartitions.size() - 1, partition);
+            sizeNewPartitions += partition.getSize();
+        }
+        long sizeConcretePartition = sizeNewPartitions;
+        for (Partition partition : partitionsCreated) {
+            partition.setInitialLimit(
+                    (internalPartitions.getLast().getInitialLimit() + sizeNewPartitions) - sizeConcretePartition);
+            sizeConcretePartition -= partition.getSize();
+            partition.setFinalLimit(
+                    (internalPartitions.getLast().getInitialLimit() + sizeNewPartitions) - sizeConcretePartition);
+        }
+        Partition finalPartition = new Partition(partitionName(),
+                internalPartitions.getLast().getSize() - sizeNewPartitions,
+                internalPartitions.getLast().getInitialLimit() + sizeNewPartitions,
+                internalPartitions.getLast().getFinalLimit());
+        internalPartitions.set(internalPartitions.size() - 1, finalPartition);
+        addPartition(finalPartition);
+    }
+
+    public Partition assignPartition(Process process) {
+        Partition partition = new Partition(partitionName(), process.getSize(), 0, 0);
+        addPartition(partition);
+        process.setPartition(partition);
+        process.addPartitionByRound(partition);
+        partition.addProcess(process);
+        return partition;
+    }
 
     // ← Asignar particiones iniciales con límites
     public void assignInitialPartitions() {
         for (Process process : initialProcesses) {
             Partition partition = new Partition(
-                partitionName(), 
-                process.getSize(),
-                partitions.size() == 0 ? 0 : partitions.get(partitions.size() - 1).getFinalLimit(),
-                partitions.size() == 0 ? process.getSize() : partitions.get(partitions.size() - 1).getFinalLimit() + process.getSize()
-            );
-            
+                    partitionName(),
+                    process.getSize(),
+                    partitions.size() == 0 ? 0 : partitions.get(partitions.size() - 1).getFinalLimit(),
+                    partitions.size() == 0 ? process.getSize()
+                            : partitions.get(partitions.size() - 1).getFinalLimit() + process.getSize());
+
             addPartition(partition);
             process.setPartition(partition);
             process.addToPartitionHistory(partition);
@@ -217,24 +265,25 @@ public class ProcessManager {
 
     // ← CORREGIDO: Ciclo de simulación (primera fase)
     private void startCycle(Process currentProcess, ArrayList<Process> remainingProcesses) {
-
+        currentProcess.addRound();
         currentProcess.addPartitionByRound(currentProcess.getPartition());
         // Registrar en estado listo
         ready(currentProcess);
-        
+
         // Ejecutar quantum
         long timeToExecute = Math.min(Constants.QUANTUM_TIME, currentProcess.getRemainingTime());
-        
+
         if (currentProcess.getPartition() != null) {
             currentProcess.getPartition().addExecutionTime(
-                currentProcess.getName(), 
-                timeToExecute
-            );
+                    currentProcess.getName(),
+                    timeToExecute);
         }
-        
+
         currentProcess.subtractTime(Constants.QUANTUM_TIME);
         currentProcess.incrementCycle();
-        
+        if (currentProcess.getName().equalsIgnoreCase("p18")) {
+            System.out.println("");
+        }
         // ¿Terminó?
         if (currentProcess.isFinished() || currentProcess.getRemainingTime() <= 0) {
             // Proceso terminado - liberar partición y condensar
@@ -242,6 +291,7 @@ public class ProcessManager {
             substractTimeToOthers(remainingProcesses, currentProcess);
             reviewForCondensations(remainingProcesses, currentProcess, false);
         } else {
+            reviewForCondensations(remainingProcesses, currentProcess, false);
             // No terminó, volver a la cola
             if (!currentProcess.isBlocked()) {
                 // No bloqueado, volver al final de la cola
@@ -257,9 +307,9 @@ public class ProcessManager {
         try {
             searchPartition(process.getPartition().getName())
                     .addExecutionTime(
-                        process.getName(),
-                        process.getRemainingTime() >= Constants.QUANTUM_TIME ? Constants.QUANTUM_TIME : process.getRemainingTime()
-                    );
+                            process.getName(),
+                            process.getRemainingTime() >= Constants.QUANTUM_TIME ? Constants.QUANTUM_TIME
+                                    : process.getRemainingTime());
         } catch (Exception e) {
             System.out.println(process.getPartition().getName() + "," + internalPartitions.toString());
         }
@@ -270,10 +320,10 @@ public class ProcessManager {
     }
 
     public void substractTimeToOthers(ArrayList<Process> remainingProcesses, Process currentProcess) {
-        long lastTime = currentProcess.getRemainingTime() < 0 ? 
-                       currentProcess.getOriginalTime() % Constants.QUANTUM_TIME : 
-                       Constants.QUANTUM_TIME;
-        
+        long lastTime = currentProcess.getRemainingTime() < 0
+                ? currentProcess.getOriginalTime() % Constants.QUANTUM_TIME
+                : Constants.QUANTUM_TIME;
+
         for (int index = 0; index < remainingProcesses.size(); index++) {
             if (remainingProcesses.get(index).getRemainingTime() <= Constants.QUANTUM_TIME) {
                 remainingProcesses.get(index).subtractTime(lastTime);
@@ -285,23 +335,24 @@ public class ProcessManager {
         }
     }
 
-
     public void reviewForCondensations(ArrayList<Process> processesForSearch, Process process, boolean isForExpired) {
         int position = partitionPosition(process.getPartition());
-        if (position == -1) return;
-        
+        if (position == -1)
+            return;
+
         boolean isPenultimate = position == internalPartitions.size() - 2;
         Partition removedPartition = null;
-        
+
         try {
             removedPartition = internalPartitions.remove(position);
         } catch (Exception e) {
-            System.out.println(process.getName() + " " + process.getPartition().getName() + " " + internalPartitions.toString());
+            System.out.println(
+                    process.getName() + " " + process.getPartition().getName() + " " + internalPartitions.toString());
             return;
         }
-        
+
         Condensation condensation = null;
-        
+
         // Mover particiones y crear condensaciones
         for (int i = position; i < internalPartitions.size(); i++) {
             if (i == internalPartitions.size() - 1) {
@@ -312,39 +363,36 @@ public class ProcessManager {
                 } else {
                     // Condensaciones posteriores: fusionar con la última
                     Partition lastPartition = internalPartitions.get(i);
-                    
+
                     long newSize = removedPartition.getSize() + lastPartition.getSize();
                     long newInitialLimit = lastPartition.getFinalLimit() - newSize;
                     long newFinalLimit = lastPartition.getFinalLimit();
-                    
+
                     Partition finalPartition = new Partition(
-                        partitionName(),
-                        newSize,
-                        newInitialLimit,
-                        newFinalLimit
-                    );
-                    
+                            partitionName(),
+                            newSize,
+                            newInitialLimit,
+                            newFinalLimit);
+
                     condensation = new Condensation(
-                        "Cond" + (condensations.size() + 1),
-                        removedPartition, 
-                        lastPartition
-                    );
-                    
+                            "Cond" + (condensations.size() + 1),
+                            removedPartition,
+                            lastPartition);
+
                     internalPartitions.set(internalPartitions.size() - 1, finalPartition);
-                    
+
                     if (!isPenultimate) {
                         Compactation compactation = new Compactation(
-                            "Compactación " + (compactations.size() + 1),
-                            condensation.getSize(), 
-                            process, 
-                            finalPartition, 
-                            isForExpired
-                        );
+                                "Compactación " + (compactations.size() + 1),
+                                condensation.getSize(),
+                                process,
+                                finalPartition,
+                                isForExpired);
                         compactations.add(compactation);
                     }
-                    
+
                     partitions.add(finalPartition);
-                    
+
                     // ← NUEVO: Registrar la partición fusionada en los logs
                     Process dummyProcess = new Process("", 0, Status.NO_BLOQUEADO, finalPartition.getSize());
                     dummyProcess.setPartition(finalPartition);
@@ -355,38 +403,36 @@ public class ProcessManager {
                 movePartition(processesForSearch, i);
             }
         }
-        
+
         // Si es la primera condensación, crear partición libre al final
         if (isFirstCondensation) {
             isFirstCondensation = false;
-            
+
             Partition lastPartition = internalPartitions.get(internalPartitions.size() - 1);
-            
+
             Partition finalPartition = new Partition(
-                partitionName(), 
-                removedPartition.getSize(),
-                lastPartition.getFinalLimit(),
-                lastPartition.getFinalLimit() + removedPartition.getSize()
-            );
-            
+                    partitionName(),
+                    removedPartition.getSize(),
+                    lastPartition.getFinalLimit(),
+                    lastPartition.getFinalLimit() + removedPartition.getSize());
+
             partitions.add(finalPartition);
             internalPartitions.add(finalPartition);
-            
+
             Compactation compactation = new Compactation(
-                "Compactación " + (compactations.size() + 1),
-                finalPartition.getSize(), 
-                process, 
-                finalPartition, 
-                isForExpired
-            );
+                    "Compactación " + (compactations.size() + 1),
+                    finalPartition.getSize(),
+                    process,
+                    finalPartition,
+                    isForExpired);
             compactations.add(compactation);
-            
+
             // ← NUEVO: Registrar la partición libre creada en los logs
             Process dummyProcess = new Process("", 0, Status.NO_BLOQUEADO, finalPartition.getSize());
             dummyProcess.setPartition(finalPartition);
             addLog(dummyProcess, Filter.PARTICIONES);
         }
-        
+
         if (condensation != null) {
             condensations.add(condensation);
         }
@@ -397,31 +443,29 @@ public class ProcessManager {
         long initialLimit = i == 0 ? 0 : internalPartitions.get(i - 1).getFinalLimit();
         long finalLimit = i == 0 ? internalPartitions.get(i).getSize()
                 : internalPartitions.get(i - 1).getFinalLimit() + internalPartitions.get(i).getSize();
-        
+
         Partition partitionCreated = new Partition(
-            partitionName(), 
-            internalPartitions.get(i).getSize(),
-            initialLimit, 
-            finalLimit
-        );
-        
+                partitionName(),
+                internalPartitions.get(i).getSize(),
+                initialLimit,
+                finalLimit);
+
         if (internalPartitions.get(i).getAssignedProcesses().size() > 0) {
             partitionCreated.addProcess(internalPartitions.get(i).getAssignedProcesses().get(0));
-            
+
             Process processToUpdate = searchProcess(
-                processesForSearch,
-                internalPartitions.get(i).getAssignedProcesses().get(0).getName()
-            );
-            
+                    processesForSearch,
+                    internalPartitions.get(i).getAssignedProcesses().get(0).getName());
+
             if (processToUpdate != null) {
                 processToUpdate.setPartition(partitionCreated);
                 processToUpdate.addToPartitionHistory(partitionCreated);
             }
         }
-        
+
         partitions.add(partitionCreated);
         internalPartitions.set(i, partitionCreated);
-        
+
         // ← NUEVO: Registrar la partición movida en los logs
         Process dummyProcess = new Process("", 0, Status.NO_BLOQUEADO, partitionCreated.getSize());
         dummyProcess.setPartition(partitionCreated);
@@ -497,7 +541,7 @@ public class ProcessManager {
     public void inExecution(Process process) {
         addLog(process, Filter.EN_EJECUCION);
         process.subtractTime(Constants.QUANTUM_TIME);
-        process.incrementCycle();  // ← NUEVO: Incrementar contador de ciclos
+        process.incrementCycle(); // ← NUEVO: Incrementar contador de ciclos
     }
 
     public void expirationTime(Process process) {
@@ -531,7 +575,7 @@ public class ProcessManager {
     }
 
     // ========== LOGS ==========
-    
+
     private void addLog(Process process, Filter filter) {
         Log log = new Log(process, filter);
         executionLogs.add(log);
@@ -545,9 +589,9 @@ public class ProcessManager {
 
     public List<Log> getLogsByFilterAndPartition(Filter filter, String partitionName) {
         return executionLogs.stream()
-                .filter(log -> log.getFilter() == filter && 
-                       log.getPartition() != null &&
-                       log.getPartition().getName().equalsIgnoreCase(partitionName))
+                .filter(log -> log.getFilter() == filter &&
+                        log.getPartition() != null &&
+                        log.getPartition().getName().equalsIgnoreCase(partitionName))
                 .collect(Collectors.toList());
     }
 
@@ -556,25 +600,24 @@ public class ProcessManager {
     }
 
     // ========== INFORMES ==========
-    
+
     public List<PartitionFinalizationInfo> getPartitionFinalizationReport() {
         List<PartitionFinalizationInfo> report = new ArrayList<>();
-        
+
         for (Partition partition : partitions) {
             String processNames = partition.getProcessHistoryString();
             long totalTime = partition.getTotalExecutionTime();
-            
+
             PartitionFinalizationInfo info = new PartitionFinalizationInfo(
-                partition.getName(),
-                partition.getSize(),
-                processNames,
-                totalTime
-            );
+                    partition.getName(),
+                    partition.getSize(),
+                    processNames,
+                    totalTime);
             report.add(info);
         }
-        
+
         report.sort((p1, p2) -> Long.compare(p1.getTotalTime(), p2.getTotalTime()));
-        
+
         return report;
     }
 
@@ -591,21 +634,32 @@ public class ProcessManager {
             this.totalTime = totalTime;
         }
 
-        public String getName() { return name; }
-        public long getSize() { return size; }
-        public String getProcessNames() { return processNames; }
-        public long getTotalTime() { return totalTime; }
+        public String getName() {
+            return name;
+        }
+
+        public long getSize() {
+            return size;
+        }
+
+        public String getProcessNames() {
+            return processNames;
+        }
+
+        public long getTotalTime() {
+            return totalTime;
+        }
     }
 
     // ========== LIMPIEZA ==========
-    
+
     public void clearAll() {
         initialProcesses.clear();
-        
+
         for (Partition p : partitions) {
             p.clearExecutionData();
         }
-        
+
         partitions.clear();
         executionLogs.clear();
         internalPartitions.clear();

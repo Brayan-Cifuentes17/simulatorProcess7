@@ -14,6 +14,8 @@ public class Process {
     private int lastPartitionIndex;
     private ArrayList<Partition> partitionHistory;  // ← NUEVO: Historial de particiones asignadas
     private ArrayList<Partition> partitionsByRound = new ArrayList<>();
+    private int round=1;
+
     // Constructor principal
     public Process(String name, long time, Status status, long size, Partition partition) {
         this.name = name;
@@ -97,6 +99,14 @@ public class Process {
 
     public int getLastPartitionIndex() {
         return lastPartitionIndex;
+    }
+
+    public int getRound() {
+        return round;
+    }
+
+    public void addRound() {
+        this.round++;
     }
 
     public void setLastPartitionIndex(int index) {
