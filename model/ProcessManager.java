@@ -15,7 +15,7 @@ public class ProcessManager {
 
     public ProcessManager() {
         initialProcesses = new ArrayList<>();
-     //   loadProcesses();
+        loadProcesses();
         partitions = new ArrayList<>();
         executionLogs = new ArrayList<>();
         internalPartitions = new ArrayList<>();
